@@ -130,8 +130,8 @@ chunks, with no `text-chunks`. The committed assistant message was:
 ```
 
 The matching stream indexes were reasoning `0`, text `1`, tool-call `2`. The
-text could only come from the Host driver. The test session is
-`session-6b91b70d-f1ed-4a33-a284-e6e79e5f6ae8` on the development machine.
+text could only come from the Host driver. The test was run locally against DSH
+`0.2.1-rc.3`; the session log itself is not published.
 
 ## Scope and limitations
 
