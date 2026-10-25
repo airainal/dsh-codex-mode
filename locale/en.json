@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Codex Mode",
+    "description": "Adds a Codex switch at the top of the permission menu and applies Codex's execution loop to the session: inspect first, plan, implement in verified increments, and continue until the task is genuinely handled. The permission level stays unchanged."
+  }
+}

@@ -1,0 +1,35 @@
+# Codex mode is stored as a permission-preset identity. The three codex-*
+# variants mirror the shipped permission bundles, so switching modes never
+# changes the sandbox or approval level underneath the user.
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+      codex-read-only:
+        sandbox: read-only
+        approval: ask
+        name: 'Codex · Read Only'
+        description: 'Codex execution loop with read-only access.'
+      codex-workspace-write:
+        sandbox: workspace-write
+        approval: ask
+        name: 'Codex · Workspace Write'
+        description: 'Codex execution loop with writes inside the workspace.'
+      codex-danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+        name: 'Codex · Full Access'
+        description: 'Codex execution loop with full file access and no approval prompts.'
+
+- insert:
+    - id: codex-mode
+      name: '@local/dsh-codex-mode'

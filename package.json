@@ -1,0 +1,57 @@
+{
+  "name": "@local/dsh-codex-mode",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Codex mode: a Codex step driver with durable progress commentary and turn continuation, switched from the top of the permission menu",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "codex",
+    "agent-loop"
+  ],
+  "author": "airainal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/airainal/dsh-codex-mode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/airainal/dsh-codex-mode/issues"
+  },
+  "homepage": "https://github.com/airainal/dsh-codex-mode#readme",
+  "icon": "./icon.svg",
+  "engines": {
+    "dsh": "^0.2.1-rc.1"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

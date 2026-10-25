@@ -1,0 +1,9 @@
+node_modules/
+*.tgz
+*.sha256
+*.log
+.DS_Store
+Thumbs.db
+.plugin-manager/
+tmp-*
+session-test*.jsonl
