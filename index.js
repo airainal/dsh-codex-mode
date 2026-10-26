@@ -15,8 +15,9 @@
  *
  * DSH remains the transport: turn construction, tool dispatch, retries,
  * compaction, approvals, and the event log are still its systems. The mode is
- * stored by the permission-preset service, so it is in the session log,
- * survives resume, and is independent of the sandbox level.
+ * represented by the permission-preset identity in each session, while one
+ * profile-level storage value remembers the switch and is applied to every
+ * root session and every newly created or resumed root agent.
  *
  * @module @local/dsh-codex-mode
  */
@@ -25,6 +26,44 @@ import { randomUUID } from 'node:crypto';
 
 /** Permission identity prefix owned by this plugin. */
 const CODEX_PREFIX = 'codex-';
+
+/** Permission levels that can carry the Codex identity. */
+const FIXED_BASES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+
+/** Parse one durable global switch value. */
+function parseCodexState(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Codex mode state must be an object');
+  }
+  if (typeof value.enabled !== 'boolean') throw new TypeError('Codex mode state.enabled must be boolean');
+  if (!Number.isSafeInteger(value.updatedAt) || value.updatedAt < 0) {
+    throw new TypeError('Codex mode state.updatedAt must be a non-negative integer');
+  }
+  return { enabled: value.enabled, updatedAt: value.updatedAt };
+}
+
+/**
+ * The profile-level `codex_mode` domain. It holds one global record so the
+ * switch is remembered across restarts and shared by every session.
+ */
+const CODEX_STATE_DOMAIN = {
+  name: 'codex_mode',
+  version: 1,
+  tables: {},
+  global: {
+    initial: { enabled: false, updatedAt: 0 },
+    schema: {
+      parse: parseCodexState,
+      safeParse(value) {
+        try {
+          return { success: true, data: parseCodexState(value) };
+        } catch (error) {
+          return { success: false, error };
+        }
+      },
+    },
+  },
+};
 
 /**
  * The Codex execution contract. This is deliberately shorter than Codex's own
@@ -419,6 +458,57 @@ function installCodexStepProtocol(ctx, agent) {
 }
 
 /**
+ * Whether one live agent is a user-facing root session.
+ *
+ * Subagents are runtime children of a root session; the global switch is a
+ * user preference, so it is applied to roots only.
+ */
+function isRootAgent(agent) {
+  return agent?.session?.header?.parentSession === undefined;
+}
+
+/**
+ * Apply the global switch to one root agent while preserving its permission
+ * level. Auto and custom permissions have no codex-* identity, so they are left
+ * untouched.
+ *
+ * @returns whether the agent ended in the requested Codex state.
+ */
+function applyCodexPreset(ctx, agent, enabled) {
+  let current;
+  try {
+    current = ctx.permissionPresets.current(agent.session);
+  } catch (error) {
+    ctx.logger.warn(
+      'codex-mode: could not read permission preset: %s',
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
+  if (typeof current !== 'string') return false;
+  const base = current.startsWith(CODEX_PREFIX) ? current.slice(CODEX_PREFIX.length) : current;
+  if (!FIXED_BASES.has(base)) return false;
+  const target = enabled ? `${CODEX_PREFIX}${base}` : base;
+  if (target === current) return true;
+  try {
+    ctx.permissionPresets.set(agent.session, target);
+    return true;
+  } catch (error) {
+    ctx.logger.warn(
+      'codex-mode: could not apply global switch to %s: %s',
+      agent.id,
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
+}
+
+/** Apply the global switch to every live root session. */
+function applyCodexToRoots(ctx, enabled) {
+  for (const agent of ctx.agents.roots()) applyCodexPreset(ctx, agent, enabled);
+}
+
+/**
  * Mount the Codex prompt and turn guard on one live agent.
  *
  * Registrations live on `agent.ctx` so they disappear with that agent. The
@@ -481,7 +571,7 @@ function setupAgent(ctx, agent, setup) {
  * Host plugin body.
  *
  * @param ctx - host context carrying the agent registry, permission presets,
- * system prompt, and session projections.
+ * system prompt, session projections, commands, and storage domains.
  */
 export function apply(ctx) {
   const setup = {
@@ -489,8 +579,41 @@ export function apply(ctx) {
     nudged: new Map(),
   };
 
-  ctx.on('agent/created', ({ agent }) => {
+  let domain;
+  let enabled = false;
+  let toggleChain = Promise.resolve();
+
+  const ready = (async () => {
+    domain = await ctx.storageDomain.open(CODEX_STATE_DOMAIN);
+    const stored = domain.global.get();
+    if (stored.updatedAt === 0) {
+      enabled = ctx.agents.roots().some((agent) => isCodexMode(ctx, agent));
+      if (enabled) await domain.global.set({ enabled: true, updatedAt: Date.now() });
+    } else {
+      enabled = stored.enabled === true;
+    }
+    for (const agent of ctx.agents.list()) setupAgent(ctx, agent, setup);
+    applyCodexToRoots(ctx, enabled);
+  })();
+
+  ready.catch((error) => {
+    ctx.logger.warn(
+      'codex-mode: global switch state unavailable: %s',
+      error instanceof Error ? error.message : String(error),
+    );
+    for (const agent of ctx.agents.list()) setupAgent(ctx, agent, setup);
+  });
+
+  ctx.effect(() => async () => {
+    await ready.catch(() => {});
+    await toggleChain.catch(() => {});
+    await domain?.close().catch(() => {});
+  }, 'codex-mode: global switch lifecycle');
+
+  ctx.on('agent/created', async ({ agent }) => {
+    await ready.catch(() => {});
     setupAgent(ctx, agent, setup);
+    if (domain !== undefined && isRootAgent(agent)) applyCodexPreset(ctx, agent, enabled);
   });
 
   ctx.on('agent/disposed', ({ agent }) => {
@@ -498,12 +621,57 @@ export function apply(ctx) {
     setup.nudged.delete(agent.id);
   });
 
-  for (const agent of ctx.agents.list()) setupAgent(ctx, agent, setup);
+  /**
+   * Persist the global value first, then apply it to every root session. Writes
+   * are serialized so two rapid toggles cannot leave the domain and sessions
+   * disagreeing.
+   */
+  const setGlobal = (next) => {
+    const run = toggleChain.then(async () => {
+      await ready;
+      await domain.global.set({ enabled: next, updatedAt: Date.now() });
+      enabled = next;
+      applyCodexToRoots(ctx, next);
+      return next;
+    });
+    toggleChain = run.catch(() => {});
+    return run;
+  };
+
+  ctx.effect(() => ctx.commands.register({
+    name: 'codex-mode',
+    description: 'Turn Codex mode on or off for every session',
+    input: { hint: 'on|off' },
+    handler: async (invocation) => {
+      const argument = invocation.rawInput.trim().toLowerCase();
+      if (argument !== 'on' && argument !== 'off') {
+        return { kind: 'error', text: 'Usage: /codex-mode on|off' };
+      }
+      try {
+        const next = await setGlobal(argument === 'on');
+        return {
+          kind: 'success',
+          text: next ? 'Codex mode on for every session.' : 'Codex mode off for every session.',
+        };
+      } catch (error) {
+        return {
+          kind: 'error',
+          text: `Codex mode failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    },
+  }), 'codex-mode: global switch command');
 }
 
 /**
- * The mode depends on the permission preset identity, the prompt registry, and
- * the todo projection. `agents` is required for agents that already exist when
- * the plugin is installed.
+ * The mode depends on the permission preset identity, the prompt registry, the
+ * todo projection, command registration, and the profile-level storage domain.
  */
-export const inject = ['agents', 'permissionPresets', 'systemPrompt', 'sessionProjections'];
+export const inject = [
+  'agents',
+  'permissionPresets',
+  'systemPrompt',
+  'sessionProjections',
+  'commands',
+  'storageDomain',
+];

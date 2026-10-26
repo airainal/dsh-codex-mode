@@ -15,13 +15,16 @@ tool loop.
 
 - **Codex switch** at the top of the permission menu, above a divider. The
   switch does not change the sandbox or approval level.
+- **Remembered globally**: the last state is stored in the profile's
+  `codex_mode` storage domain. Turning it on or off applies to every live root
+  session; new and resumed sessions inherit it automatically.
 - **Visible progress** before every tool batch. The model's own commentary is
   kept; a missing one is inserted by the driver in the user's language.
 - **Turn continuation** when the todo list still has unfinished work and the
   assistant is not asking a question.
-- **Durable state** stored as a permission-preset identity
-  (`codex-read-only`, `codex-workspace-write`, `codex-danger-full-access`), so
-  it survives reload and resume and appears in the session log.
+- **Durable per-session identity** stored as `codex-read-only`,
+  `codex-workspace-write`, or `codex-danger-full-access`, so the mode appears in
+  the session log and survives resume.
 - **Same safety gates** for Full access and Auto review as the stock permission
   control.
 
@@ -64,7 +67,7 @@ the release asset URL or the downloaded `.tgz` path into **Plugins → Install
 bundle**:
 
 ```text
-https://github.com/airainal/dsh-codex-mode/releases/download/v1.0.0/dsh-codex-mode-1.0.0.tgz
+https://github.com/airainal/dsh-codex-mode/releases/download/v1.1.0/dsh-codex-mode-1.1.0.tgz
 ```
 
 ### After installing
@@ -88,10 +91,22 @@ The menu has two dimensions:
 - the Codex switch controls the execution protocol;
 - the permission choices control the sandbox and approval policy.
 
-Turning Codex on while `Workspace Write` is selected moves the session to the
-matching `codex-workspace-write` identity, but the sandbox stays
-`workspace-write`. Changing permission while the mode is on keeps the mode and
-moves to the matching `codex-*` variant.
+Turning Codex on while `Workspace Write` is selected moves every live root
+session to its matching `codex-workspace-write` identity, but each sandbox stays
+`workspace-write`. The last switch state is remembered; a new or resumed session
+is moved to its matching `codex-*` identity automatically. Changing permission
+while the mode is on keeps the global mode and changes only that session's
+permission base.
+
+The same toggle is available as a Host command:
+
+```text
+/codex-mode on
+/codex-mode off
+```
+
+`Auto review` is disabled while Codex is on because there is no `codex-auto`
+identity. Turn Codex off first if you want Auto review.
 
 The trigger shows a Codex mark on the right when the mode is on. It slides out
 with a 240 ms width/opacity transition, and the menu stays open while switching.
@@ -102,6 +117,10 @@ The package is a DSH bundle with a Host half and a Web client half.
 
 - `cordis.patch.yml` adds the three `codex-*` permission presets and mounts the
   Host plugin.
+- A profile-level `codex_mode` storage domain keeps `{ enabled, updatedAt }`.
+  The `/codex-mode on|off` command writes it first, then applies the matching
+  `codex-*` or base preset to every live root session. The `agent/created`
+  listener applies the remembered value to new and resumed root agents.
 - The Host plugin adds the `codex:mode` system-prompt section and wraps each
   live agent's step. In Codex mode, an `assistant/message` that contains only
   tool calls gets a leading progress text block before it is committed; the
@@ -144,7 +163,8 @@ text could only come from the Host driver. The test was run locally against DSH
   maintain custom permission presets in a profile, carry them into
   [cordis.patch.yml](cordis.patch.yml) before installing.
 - The built-in `/permission` command also lists the `codex-*` identities. Use the
-  composer menu for the intended two-dimensional behavior.
+  composer menu or `/codex-mode on|off` for the global switch; a direct
+  `/permission` change is a per-session override.
 - The Settings default-permission selector lists the `codex-*` presets because
   they are ordinary permission presets; the composer menu is the intended place
   to switch a running session.
@@ -188,7 +208,7 @@ pnpm pack
 ```
 
 装好后打开任意会话，点输入框下方的权限按钮，在菜单顶部打开 **Codex 模式**。
-权限级别不会改变；Codex 模式关闭时，行为与原生 DSH 一致。
+开关状态会被记住并同步到所有会话，新会话自动继承；权限级别不会改变。
 
 ## License
 

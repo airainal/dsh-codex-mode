@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-codex-mode",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Codex mode: a Codex step driver with durable progress commentary and turn continuation, switched from the top of the permission menu",
+  "description": "Codex mode: a durable, profile-wide Codex step driver with progress commentary, turn continuation, and a remembered permission-menu switch",
   "keywords": [
     "dsh",
     "dsh-plugin",

@@ -31,10 +31,11 @@ window.__ModuleLoader__.load({
 			'menu.label': '权限与 Codex 模式',
 			'codex.label': 'Codex 模式',
 			'codex.badge': 'CX',
-			'codex.hint': '按 Codex 的执行循环工作：执行中持续输出进度，先读代码、列计划、逐步实现并验证，直到任务真正完成。权限级别保持不变。',
+			'codex.hint': '按 Codex 的执行循环工作：执行中持续输出进度，先读代码、列计划、逐步实现并验证。开关状态会记住并同步到所有会话，权限级别保持不变。',
+			'codex.autoOff': '关闭 Codex 模式后才能使用自动审查',
 			'codex.unavailable': '先切换到固定权限后才能开启 Codex 模式',
-			'codex.on': 'Codex 模式已开启',
-			'codex.off': 'Codex 模式已关闭',
+			'codex.on': 'Codex 模式已开启（所有会话）',
+			'codex.off': 'Codex 模式已关闭（所有会话）',
 			'preset.readOnly': '仅可查看',
 			'preset.workspaceWrite': '工作区内修改',
 			'preset.fullAccess': '完全权限',
@@ -64,10 +65,11 @@ window.__ModuleLoader__.load({
 			'menu.label': 'Permission and Codex mode',
 			'codex.label': 'Codex mode',
 			'codex.badge': 'CX',
-			'codex.hint': "Run Codex's execution loop with live progress while tools run: inspect, plan, implement in verified increments, and continue until the task is genuinely handled. The permission level stays unchanged.",
+			'codex.hint': "Run Codex's execution loop with live progress while tools run: inspect, plan, implement in verified increments. The switch is remembered across all sessions; the permission level stays unchanged.",
+			'codex.autoOff': 'Turn Codex mode off before using Auto review',
 			'codex.unavailable': 'Select a fixed permission before enabling Codex mode',
-			'codex.on': 'Codex mode is on',
-			'codex.off': 'Codex mode is off',
+			'codex.on': 'Codex mode is on for every session',
+			'codex.off': 'Codex mode is off for every session',
 			'preset.readOnly': 'Read Only',
 			'preset.workspaceWrite': 'Workspace Write',
 			'preset.fullAccess': 'Full access',
@@ -206,6 +208,34 @@ window.__ModuleLoader__.load({
 			}
 			try {
 				const carried = await commands.execute(sessionId, `/permission ${preset}`, []);
+				if (carried === null || carried === undefined || carried.ok !== true) {
+					return { ok: false, message: carried?.error?.message };
+				}
+				const result = carried.value?.result;
+				if (result !== undefined && result !== null && result.kind === 'error') {
+					return { ok: false, message: typeof result.text === 'string' ? result.text : undefined };
+				}
+				return { ok: true };
+			} catch (error) {
+				return { ok: false, message: error instanceof Error ? error.message : undefined };
+			}
+		}
+
+		/**
+		 * Toggle the profile-level Codex switch. The Host persists it and applies
+		 * it to every root session, including this one.
+		 * @param ctx - Client root context.
+		 * @param sessionId - Session that initiated the toggle.
+		 * @param enabled - desired global state.
+		 * @returns `{ ok: true }` or a failure with a host message.
+		 */
+		async function switchCodex(ctx, sessionId, enabled) {
+			const commands = remoteNamespace(ctx, 'commands');
+			if (commands === undefined || typeof commands.execute !== 'function') {
+				return { ok: false, message: 'permission commands are unavailable' };
+			}
+			try {
+				const carried = await commands.execute(sessionId, `/codex-mode ${enabled ? 'on' : 'off'}`, []);
 				if (carried === null || carried === undefined || carried.ok !== true) {
 					return { ok: false, message: carried?.error?.message };
 				}
@@ -562,13 +592,39 @@ window.__ModuleLoader__.load({
 			const fixedBase = typeof baseValue === 'string' && baseValue !== '' && baseValue !== 'auto' && baseValue !== 'custom';
 			const canToggle = !locked && fixedBase && (codex || permissions.some((option) => option.value === baseValue));
 
+			const applyCodex = useCallback(async (enabled) => {
+				setBusy(true);
+				setError(null);
+				try {
+					const result = await ops.setCodex(enabled);
+					if (result !== undefined && result !== null && result.ok === false) {
+						setError(typeof result.message === 'string' && result.message !== '' ? result.message : t('error.switch'));
+						setOpen(true);
+						return;
+					}
+					setOpen(true);
+				} catch (failure) {
+					setError(failure instanceof Error && failure.message !== '' ? failure.message : t('error.switch'));
+					setOpen(true);
+				} finally {
+					setBusy(false);
+				}
+			}, [ops, t]);
+
 			const toggleCodex = useCallback(() => {
 				if (!canToggle || busy) return;
-				requestPreset(codex ? baseValue : `${CODEX_PREFIX}${baseValue}`, true);
-			}, [busy, canToggle, codex, baseValue, requestPreset]);
+				if (typeof ops.setCodex !== 'function') {
+					// A page opened before the global switch shipped still has the
+					// old slot props; keep the switch usable until it is refreshed.
+					requestPreset(codex ? baseValue : `${CODEX_PREFIX}${baseValue}`, true);
+					return;
+				}
+				void applyCodex(!codex);
+			}, [applyCodex, baseValue, busy, canToggle, codex, ops, requestPreset]);
 
 			const choosePermission = useCallback((value) => {
 				if (locked || busy) return;
+				if (codex && value === 'auto') return;
 				const target = codex && value !== 'auto' ? `${CODEX_PREFIX}${value}` : value;
 				requestPreset(target);
 			}, [busy, codex, locked, requestPreset]);
@@ -618,14 +674,17 @@ window.__ModuleLoader__.load({
 				error === null ? null : h('div', { key: 'error', className: 'dcm-error', role: 'alert' }, error),
 				...permissions.map((option) => {
 					const selected = option.value === baseValue;
+					const autoBlocked = codex && option.value === 'auto';
 					return h('button', {
 						key: option.value,
 						type: 'button',
 						role: 'menuitemradio',
 						'aria-checked': selected,
-						title: option.value === 'auto' ? t('auto.description') : option.description,
+						title: autoBlocked
+							? t('codex.autoOff')
+							: (option.value === 'auto' ? t('auto.description') : option.description),
 						className: 'dcm-item',
-						disabled: locked,
+						disabled: locked || autoBlocked,
 						onClick: () => choosePermission(option.value),
 					},
 					h('span', { className: 'dcm-icon' }, h(PermissionIcon, { value: option.value })),
@@ -741,6 +800,7 @@ window.__ModuleLoader__.load({
 					ops: {
 						loadCatalog: () => loadCatalog(ctx),
 						select: (preset) => switchPreset(ctx, sessionId, preset),
+						setCodex: (enabled) => switchCodex(ctx, sessionId, enabled),
 					},
 				}),
 			}, PermissionControl));
