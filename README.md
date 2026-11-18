@@ -30,8 +30,8 @@ tool loop.
 
 ## Requirements
 
-- DSH Desktop or Web with the Plugin Manager. Tested with DSH `0.2.1-rc.3`.
-- The package declares `engines.dsh: ^0.2.1-rc.1`; install it on a 0.2.1-rc.x
+- DSH Desktop or Web with the Plugin Manager. Tested with DSH `0.2.2-rc.3`.
+- The package declares `engines.dsh: ^0.2.1-rc.1`; install it on a 0.2.x
   runtime.
 - Git and network access to GitHub for the first install.
 
@@ -67,7 +67,7 @@ the release asset URL or the downloaded `.tgz` path into **Plugins → Install
 bundle**:
 
 ```text
-https://github.com/airainal/dsh-codex-mode/releases/download/v1.1.0/dsh-codex-mode-1.1.0.tgz
+https://github.com/airainal/dsh-codex-mode/releases/download/v1.1.1/dsh-codex-mode-1.1.1.tgz
 ```
 
 ### After installing

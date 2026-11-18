@@ -503,9 +503,14 @@ function applyCodexPreset(ctx, agent, enabled) {
   }
 }
 
+/** Live user-facing root sessions (subagents have a parentSession). */
+function rootAgents(ctx) {
+  return ctx.agents.list().filter(isRootAgent);
+}
+
 /** Apply the global switch to every live root session. */
 function applyCodexToRoots(ctx, enabled) {
-  for (const agent of ctx.agents.roots()) applyCodexPreset(ctx, agent, enabled);
+  for (const agent of rootAgents(ctx)) applyCodexPreset(ctx, agent, enabled);
 }
 
 /**
@@ -587,7 +592,7 @@ export function apply(ctx) {
     domain = await ctx.storageDomain.open(CODEX_STATE_DOMAIN);
     const stored = domain.global.get();
     if (stored.updatedAt === 0) {
-      enabled = ctx.agents.roots().some((agent) => isCodexMode(ctx, agent));
+      enabled = rootAgents(ctx).some((agent) => isCodexMode(ctx, agent));
       if (enabled) await domain.global.set({ enabled: true, updatedAt: Date.now() });
     } else {
       enabled = stored.enabled === true;
